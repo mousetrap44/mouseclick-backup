@@ -1,13 +1,12 @@
 export default async function handler(req, res) {
   try {
-    const url = "https://raw.githubusercontent.com/djdoolky76/Mediaquest-EPG/main/cignal_epg.xml";
+    const url =
+      "https://raw.githubusercontent.com/djdoolky76/Mediaquest-EPG/main/cignal_epg.xml";
 
-    const response = await fetch(url, {
-      headers: { "User-Agent": "Mouseclick-FreeTV" }
-    });
+    const response = await fetch(url);
 
     if (!response.ok) {
-      return res.status(500).send("Failed to fetch EPG");
+      return res.status(500).send("Unable to fetch EPG");
     }
 
     const xml = await response.text();
@@ -16,7 +15,8 @@ export default async function handler(req, res) {
     res.setHeader("Cache-Control", "public, max-age=900");
 
     return res.status(200).send(xml);
-  } catch (e) {
-    return res.status(500).send(e.toString());
+
+  } catch (err) {
+    return res.status(500).send(err.toString());
   }
 }
