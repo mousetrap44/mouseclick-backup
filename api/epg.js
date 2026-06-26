@@ -29,11 +29,14 @@ export default async function handler(req, res) {
       "knowledge.ph": "knowledge_channel"
     };
 
+    // Copy source channel programmes to Mouseclick tvg-id
     for (const [targetId, sourceId] of Object.entries(mappings)) {
-      xml = xml.replace(
-        "</tv>",
-        `<channel id="${targetId}"><display-name>${targetId}</display-name></channel>\n</tv>`
-      );
+      if (!xml.includes(`channel id="${targetId}"`)) {
+        xml = xml.replace(
+          "</tv>",
+          `<channel id="${targetId}"><display-name>${targetId}</display-name></channel>\n</tv>`
+        );
+      }
 
       const regex = new RegExp(
         `<programme([^>]*?)channel="${sourceId}"([^>]*?)>([\\s\\S]*?)<\\/programme>`,
@@ -50,6 +53,22 @@ export default async function handler(req, res) {
       xml = xml.replace("</tv>", extra + "</tv>");
     }
 
+    // Rolling date fix: shift old EPG dates to today's PH date
+    const now = new Date();
+    const phNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Manila" }));
+
+    const yyyy = phNow.getFullYear().toString();
+    const mm = String(phNow.getMonth() + 1).padStart(2, "0");
+    const dd = String(phNow.getDate()).padStart(2, "0");
+    const today = `${yyyy}${mm}${dd}`;
+
+    xml = xml.replace(
+      /(start|stop)="(\d{8})(\d{6}) \+0800"/g,
+      (full, attr, oldDate, time) => {
+        return `${attr}="${today}${time} +0800"`;
+      }
+    );
+
     if (req.query.channels === "1") {
       const ids = [...xml.matchAll(/<channel id="([^"]+)"/g)].map(m => m[1]);
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
@@ -57,7 +76,7 @@ export default async function handler(req, res) {
     }
 
     res.setHeader("Content-Type", "application/xml; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=900");
+    res.setHeader("Cache-Control", "public, max-age=300");
 
     return res.status(200).send(xml);
   } catch (error) {
