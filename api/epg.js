@@ -1,7 +1,17 @@
 export default async function handler(req, res) {
   try {
-    const sourceUrl = "https://raw.githubusercontent.com/djdoolky76/Mediaquest-EPG/main/cignal_epg.xml";
-    let xml = await (await fetch(sourceUrl, { headers: { "User-Agent": "Mouseclick-FreeTV-EPG" } })).text();
+    const sourceUrl =
+      "https://raw.githubusercontent.com/djdoolky76/Mediaquest-EPG/main/cignal_epg.xml";
+
+    const response = await fetch(sourceUrl, {
+      headers: { "User-Agent": "Mouseclick-FreeTV-EPG" }
+    });
+
+    if (!response.ok) {
+      return res.status(500).send("Failed to fetch EPG source");
+    }
+
+    let xml = await response.text();
 
     const mappings = {
       "tv5.ph": "tv5",
@@ -19,32 +29,51 @@ export default async function handler(req, res) {
       "knowledge.ph": "knowledge_channel"
     };
 
-    // Roll EPG dates to today PH time
+    // PH today
     const phNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Manila" }));
-    const today =
-      phNow.getFullYear().toString() +
-      String(phNow.getMonth() + 1).padStart(2, "0") +
-      String(phNow.getDate()).padStart(2, "0");
+    const y = phNow.getFullYear();
+    const m = String(phNow.getMonth() + 1).padStart(2, "0");
+    const d = String(phNow.getDate()).padStart(2, "0");
+    const today = `${y}${m}${d}`;
 
-    xml = xml.replace(/(start|stop)="\d{8}(\d{6}) \+0800"/g, `$1="${today}$2 +0800"`);
+    // Tomorrow PH
+    const phTomorrow = new Date(phNow);
+    phTomorrow.setDate(phTomorrow.getDate() + 1);
+    const ty = phTomorrow.getFullYear();
+    const tm = String(phTomorrow.getMonth() + 1).padStart(2, "0");
+    const td = String(phTomorrow.getDate()).padStart(2, "0");
+    const tomorrow = `${ty}${tm}${td}`;
 
-    // Copy source programmes to Mouseclick IDs
+    // Roll every programme to current PH date, but preserve overnight stop.
+    xml = xml.replace(
+      /<programme([^>]*?)start="(\d{8})(\d{6}) \+0800"([^>]*?)stop="(\d{8})(\d{6}) \+0800"([^>]*?)>/g,
+      (full, beforeStart, oldStartDate, startTime, mid, oldStopDate, stopTime, afterStop) => {
+        const stopDate = stopTime <= startTime ? tomorrow : today;
+        return `<programme${beforeStart}start="${today}${startTime} +0800"${mid}stop="${stopDate}${stopTime} +0800"${afterStop}>`;
+      }
+    );
+
+    // Add Mouseclick-mapped channel ids and programmes
     let additions = "";
 
     for (const [targetId, sourceId] of Object.entries(mappings)) {
       additions += `<channel id="${targetId}"><display-name>${targetId}</display-name></channel>\n`;
 
-      const re = new RegExp(`<programme([^>]*?)channel="${sourceId}"([^>]*?)>([\\s\\S]*?)<\\/programme>`, "g");
-      let m;
-      while ((m = re.exec(xml)) !== null) {
-        additions += `<programme${m[1]}channel="${targetId}"${m[2]}>${m[3]}</programme>\n`;
+      const re = new RegExp(
+        `<programme([^>]*?)channel="${sourceId}"([^>]*?)>([\\s\\S]*?)<\\/programme>`,
+        "g"
+      );
+
+      let match;
+      while ((match = re.exec(xml)) !== null) {
+        additions += `<programme${match[1]}channel="${targetId}"${match[2]}>${match[3]}</programme>\n`;
       }
     }
 
     xml = xml.replace("</tv>", additions + "</tv>");
 
     if (req.query.channels === "1") {
-      const ids = [...xml.matchAll(/<channel id="([^"]+)"/g)].map(x => x[1]);
+      const ids = [...xml.matchAll(/<channel id="([^"]+)"/g)].map(m => m[1]);
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       res.setHeader("Cache-Control", "no-store");
       return res.status(200).send(ids.join("\n"));
@@ -52,9 +81,10 @@ export default async function handler(req, res) {
 
     if (req.query.find) {
       const id = req.query.find;
-      const list = [...xml.matchAll(new RegExp(`<programme[^>]*channel="${id}"[^>]*>[\\s\\S]*?<\\/programme>`, "g"))]
-        .slice(0, 10)
-        .map(x => x[0]);
+      const list = [...xml.matchAll(
+        new RegExp(`<programme[^>]*channel="${id}"[^>]*>[\\s\\S]*?<\\/programme>`, "g")
+      )].slice(0, 10).map(x => x[0]);
+
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       res.setHeader("Cache-Control", "no-store");
       return res.status(200).send(list.join("\n\n"));
@@ -64,7 +94,7 @@ export default async function handler(req, res) {
     res.setHeader("Cache-Control", "no-store");
     return res.status(200).send(xml);
 
-  } catch (e) {
-    return res.status(500).send("EPG Error: " + e.message);
+  } catch (error) {
+    return res.status(500).send("EPG Error: " + error.message);
   }
 }
